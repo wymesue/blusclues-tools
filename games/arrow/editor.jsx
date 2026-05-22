@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { supabase } from "../../lib/supabase.js";
 import { DV, DK, simulateExit } from "./arrow-logic.js";
 
@@ -188,6 +188,59 @@ export default function Editor({ levels: initialLevels, difficulty }) {
   const sol   = solutions[selLevel];
   const snake = level?.snakes.find(s => s.id === selSnake);
 
+  // ── AUTO SOLVE ALL ON LOAD ──
+  useEffect(() => {
+    if (!levels.length) return;
+    let cancelled = false;
+    const runAll = async () => {
+      for (let i = 0; i < levels.length; i++) {
+        if (cancelled) break;
+        await new Promise(r => setTimeout(r, 0));
+        const l = levels[i];
+        const result = solve(l.snakes, l.cols, l.rows);
+        setSolutions(prev => ({ ...prev, [i]: result }));
+      }
+    };
+    runAll();
+    return () => { cancelled = true; };
+  }, []);
+
+  // ── SAVE ALL SOLVABLE ──
+  const [savingAll, setSavingAll] = useState(false);
+  const [saveAllProgress, setSaveAllProgress] = useState(null);
+
+  const saveAll = async () => {
+    setSavingAll(true);
+    const solvable = levels.map((l, i) => ({ l, i })).filter(({ i }) => solutions[i]?.order);
+    setSaveAllProgress({ done: 0, total: solvable.length });
+
+    for (let idx = 0; idx < solvable.length; idx++) {
+      const { l, i } = solvable[idx];
+      if (saved[i]) { setSaveAllProgress({ done: idx + 1, total: solvable.length }); continue; }
+      const diff = l.difficulty || difficulty || "easy";
+
+      const { data: existing } = await supabase
+        .from("levels").select("position")
+        .eq("game", "snake_escape").eq("difficulty", diff)
+        .order("position", { ascending: false }).limit(1);
+
+      const nextPos = existing?.[0]?.position ? existing[0].position + 1 : 1;
+
+      const { error } = await supabase.from("levels").insert({
+        game: "snake_escape", difficulty: diff, position: nextPos,
+        data: { cols: l.cols, rows: l.rows, snakes: l.snakes },
+        active: true,
+      });
+
+      if (!error) setSaved(prev => ({ ...prev, [i]: true }));
+      setSaveAllProgress({ done: idx + 1, total: solvable.length });
+      await new Promise(r => setTimeout(r, 50));
+    }
+
+    setSavingAll(false);
+    setSaveAllProgress(null);
+  };
+
   // ── SOLVE ──
   const runSolve = async () => {
     if (!level) return;
@@ -346,8 +399,28 @@ export default function Editor({ levels: initialLevels, difficulty }) {
 
       {/* Sidebar */}
       <div style={s.sidebar}>
-        <div style={{ padding:"16px 14px", borderBottom:"1px solid #1a2040", fontSize:16, fontWeight:700, color:"#4a9eff" }}>
-          🐍 Levels ({levels.length})
+        <div style={{ padding:"16px 14px", borderBottom:"1px solid #1a2040" }}>
+          <div style={{ fontSize:16, fontWeight:700, color:"#4a9eff", marginBottom:10 }}>
+            🐍 Levels ({levels.length})
+          </div>
+          <div style={{ fontSize:12, color:"#8a9bc0", marginBottom:10 }}>
+            ✅ {Object.values(solutions).filter(s => s?.order).length} solvable &nbsp;
+            ❌ {Object.values(solutions).filter(s => s && !s.order).length} unsolvable &nbsp;
+            • {levels.length - Object.keys(solutions).length} checking…
+          </div>
+          {saveAllProgress ? (
+            <div style={{ fontSize:12, color:"#ffd93d" }}>
+              Saving {saveAllProgress.done}/{saveAllProgress.total}…
+            </div>
+          ) : (
+            <button
+              onClick={saveAll}
+              disabled={savingAll || !Object.values(solutions).some(s => s?.order)}
+              style={{ background:"#7bed9f", border:"none", borderRadius:8, color:"#0d1020",
+                padding:"8px 14px", fontSize:13, fontWeight:700, cursor:"pointer", width:"100%" }}>
+              💾 Save All Solvable
+            </button>
+          )}
         </div>
         <div style={{ flex:1, overflowY:"auto" }}>
           {levels.map((l, i) => (
