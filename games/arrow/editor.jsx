@@ -178,6 +178,7 @@ export default function Editor({ levels: initialLevels, difficulty }) {
   const [solveStep, setSolveStep] = useState(null);
   const [saving,    setSaving]    = useState(false);
   const [saved,     setSaved]     = useState({});
+  const [filter,    setFilter]    = useState("all");
 
   // Drawing state
   const [drawing,   setDrawing]   = useState(false);
@@ -403,10 +404,18 @@ export default function Editor({ levels: initialLevels, difficulty }) {
           <div style={{ fontSize:16, fontWeight:700, color:"#4a9eff", marginBottom:10 }}>
             🐍 Levels ({levels.length})
           </div>
-          <div style={{ fontSize:12, color:"#8a9bc0", marginBottom:10 }}>
-            ✅ {Object.values(solutions).filter(s => s?.order).length} solvable &nbsp;
-            ❌ {Object.values(solutions).filter(s => s && !s.order).length} unsolvable &nbsp;
-            • {levels.length - Object.keys(solutions).length} checking…
+          <div style={{ display:"flex", gap:6, marginBottom:10 }}>
+            {["all", "✅", "❌"].map(f => (
+              <button key={f} onClick={() => setFilter(f)} style={{
+                background: filter === f ? "#4a9eff" : "#1e2438",
+                border:`1px solid ${filter === f ? "#4a9eff" : "#2a3050"}`,
+                borderRadius:6, color: filter === f ? "#fff" : "#c8cfe0",
+                padding:"4px 10px", fontSize:13, cursor:"pointer", fontWeight: filter === f ? 700 : 400,
+              }}>{f === "all" ? "All" : f}</button>
+            ))}
+            <span style={{ fontSize:12, color:"#8a9bc0", alignSelf:"center", marginLeft:4 }}>
+              {Object.values(solutions).filter(s => s && !s.order).length} unsolvable
+            </span>
           </div>
           {saveAllProgress ? (
             <div style={{ fontSize:12, color:"#ffd93d" }}>
@@ -423,7 +432,11 @@ export default function Editor({ levels: initialLevels, difficulty }) {
           )}
         </div>
         <div style={{ flex:1, overflowY:"auto" }}>
-          {levels.map((l, i) => (
+          {levels.map((l, i) => {
+            const sol = solutions[i];
+            if (filter === "✅" && (!sol || !sol.order)) return null;
+            if (filter === "❌" && (!sol || sol.order)) return null;
+            return (
             <div key={i} onClick={() => { setSelLevel(i); setSelSnake(null); setSolveStep(null); setDrawing(false); setDrawCells([]); }}
               style={{ padding:"14px 16px", borderBottom:"1px solid #0d1020",
                 background: i === selLevel ? "#1a2040" : "transparent",
@@ -437,7 +450,8 @@ export default function Editor({ levels: initialLevels, difficulty }) {
                 {saved[i] && <span style={{ fontSize:11, color:"#7bed9f" }}>saved</span>}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
