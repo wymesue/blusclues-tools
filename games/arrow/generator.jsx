@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { DV, DK, simulateExit } from "./arrow-logic.js";
+import { DV, DK, simulateExit, getExitRayCells, blocksExitPath, createsDependency } from "./arrow-logic.js";
 
 // ── DIFFICULTY CONFIGS ────────────────────────────────────────────────────────
 const DIFFICULTIES = {
@@ -16,8 +16,6 @@ function lcg(seed) {
 }
 
 // ── MAKE LEVEL ────────────────────────────────────────────────────────────────
-// Maze fills the grid beautifully with turn bias.
-// Directions assigned in reverse order so each snake can exit when it's its turn.
 function makeLevel(cols, rows, minLen, maxLen, seed, depRate) {
   const rand = lcg(seed);
   const ri = n => Math.floor(rand() * n);
@@ -30,40 +28,27 @@ function makeLevel(cols, rows, minLen, maxLen, seed, depRate) {
   const treeNbrs = new Map();
   for (const c of validCells) treeNbrs.set(key(c.x, c.y), []);
 
-  // ── Maze carving with turn bias ──
   const mazeVisited = new Set();
   const startCell = validCells[ri(validCells.length)];
   mazeVisited.add(key(startCell.x, startCell.y));
   const stack = [startCell];
-  let lastDir = null;
 
   while (stack.length) {
     const cur = stack[stack.length - 1];
-    const neighbors = [...DK]
+    const unvisited = [...DK]
       .sort(() => rand() - 0.5)
-      .map(d => ({ d, ...(() => { const {dx,dy} = DV[d]; return {x:cur.x+dx, y:cur.y+dy}; })() }))
+      .map(d => { const { dx, dy } = DV[d]; return { x: cur.x + dx, y: cur.y + dy }; })
       .filter(n => inBounds(n.x, n.y) && !mazeVisited.has(key(n.x, n.y)));
-
-    if (neighbors.length) {
-      // Prefer turning 65% of the time
-      const turns = lastDir ? neighbors.filter(n => n.d !== lastDir) : [];
-      const next = turns.length > 0 && rand() < 0.65 
-        ? turns[Math.floor(rand() * turns.length)]
-        : neighbors[0];
-      
-      lastDir = next.d;
+    if (unvisited.length) {
+      const next = unvisited[0];
       const nk = key(next.x, next.y), ck = key(cur.x, cur.y);
       mazeVisited.add(nk);
       treeNbrs.get(ck).push(nk);
       treeNbrs.get(nk).push(ck);
-      stack.push({ x: next.x, y: next.y });
-    } else {
-      stack.pop();
-      lastDir = null;
-    }
+      stack.push(next);
+    } else { stack.pop(); }
   }
 
-  // ── Segment carving ──
   const assigned = new Set();
   const segments = [];
 
@@ -82,18 +67,7 @@ function makeLevel(cols, rows, minLen, maxLen, seed, depRate) {
     if (!startKey) break;
     const seg = [startKey];
     assigned.add(startKey);
-
-    // Weighted length per segment: 40% short, 40% medium, 20% long
-    const roll = rand();
-    const shortMax = Math.max(minLen, Math.floor(maxLen * 0.33));
-    const medMax   = Math.max(shortMax + 1, Math.floor(maxLen * 0.66));
-    const segMaxLen = roll < 0.40
-      ? Math.floor(rand() * (shortMax - minLen + 1)) + minLen
-      : roll < 0.80
-      ? Math.floor(rand() * (medMax - shortMax)) + shortMax + 1
-      : Math.floor(rand() * (maxLen - medMax)) + medMax + 1;
-
-    while (seg.length < segMaxLen) {
+    while (seg.length < maxLen) {
       const curKey = seg[seg.length - 1];
       const unassignedNbrs = treeNbrs.get(curKey).filter(n => !assigned.has(n));
       if (!unassignedNbrs.length) break;
@@ -103,7 +77,7 @@ function makeLevel(cols, rows, minLen, maxLen, seed, depRate) {
         const [px, py] = seg[seg.length - 2].split(",").map(Number);
         const straight = key(cx + (cx - px), cy + (cy - py));
         const turns = unassignedNbrs.filter(n => n !== straight);
-        if (turns.length > 0 && rand() < 0.65) {
+        if (turns.length > 0 && rand() < 0.70) {
           nextKey = turns[Math.floor(rand() * turns.length)];
         } else if (unassignedNbrs.includes(straight)) {
           nextKey = straight;
@@ -111,67 +85,67 @@ function makeLevel(cols, rows, minLen, maxLen, seed, depRate) {
           nextKey = unassignedNbrs[Math.floor(rand() * unassignedNbrs.length)];
         }
       }
-      if (unassignedNbrs.length > 1) break;
+      const junctionThreshold = Math.max(minLen, Math.floor(maxLen * 0.45));
+      if (seg.length >= junctionThreshold && unassignedNbrs.length > 1) break;
       seg.push(nextKey);
       assigned.add(nextKey);
     }
     segments.push(seg.map(k => { const [x, y] = k.split(",").map(Number); return { x, y }; }));
   }
 
-  // ── Smart reverse direction assignment ──
-  // Process segments in reverse. Each snake gets the first direction that
-  // allows it to exit given snakes already assigned (which come after it in play order).
   const snakes = [];
-  let id = segments.length - 1;
+  let id = 0;
 
-  for (let i = segments.length - 1; i >= 0; i--) {
-    const cells = segments[i];
-    let placed = false;
+  for (const cells of segments) {
+    const bodyDx = Math.abs(cells[0].x - cells[cells.length - 1].x);
+    const bodyDy = Math.abs(cells[0].y - cells[cells.length - 1].y);
+    const isHoriz = bodyDx >= bodyDy;
+    const makeDirs = () => {
+      if (rand() < 0.6) {
+        const axial = (isHoriz ? ["L", "R"] : ["U", "D"]).sort(() => rand() - 0.5);
+        const lateral = (isHoriz ? ["U", "D"] : ["L", "R"]).sort(() => rand() - 0.5);
+        return [...axial, ...lateral];
+      }
+      return [...DK].sort(() => rand() - 0.5);
+    };
 
-    for (const orientation of [cells, [...cells].reverse()]) {
+    const isInstantExit = (orientation, dir) => {
+      const h = orientation[0];
+      const { dx, dy } = DV[dir];
+      const nx = h.x + dx, ny = h.y + dy;
+      return nx < 0 || nx >= cols || ny < 0 || ny >= rows;
+    };
+
+    let placed = null, fallback = null;
+    for (const [orientation, dl] of [[cells, makeDirs()], [[...cells].reverse(), makeDirs()]]) {
       if (placed) break;
-      const shuffledDirs = [...DK].sort(() => rand() - 0.5);
-      for (const dir of shuffledDirs) {
+      for (const dir of dl) {
+        if (isInstantExit(orientation, dir) && rand() < 0.5) continue;
         const ownCells = new Set(orientation.map(c => key(c.x, c.y)));
-        // Check snake doesn't point back into itself
-        const { dx, dy } = DV[dir];
-        const headX = orientation[0].x + dx;
-        const headY = orientation[0].y + dy;
-        if (ownCells.has(key(headX, headY))) continue;
-        
+        const ray = getExitRayCells({ cells: orientation, dir }, cols, rows);
+        if (ray.some(c => ownCells.has(`${c.x},${c.y}`))) continue;
         const candidate = { id, dir, cells: orientation };
-        // Can this snake exit given the snakes already placed?
-        if (simulateExit(candidate, snakes, cols, rows)) {
-          snakes.push(candidate);
-          placed = true;
-          id--;
-          break;
-        }
+        if (!simulateExit(candidate, snakes, cols, rows)) continue;
+        const hasDep = createsDependency(candidate, snakes, cols, rows);
+        const requireDep = snakes.length > 0 && rand() < depRate;
+        if (!requireDep || hasDep) { placed = candidate; break; }
+        else if (!fallback) fallback = candidate;
       }
     }
 
-    // If no valid direction found, place with best guess
-    if (!placed) {
-      for (const dir of DK) {
+    let final = placed || fallback;
+    if (!final) {
+      for (const dir of [...DK].sort(() => rand() - 0.5)) {
         const ownCells = new Set(cells.map(c => key(c.x, c.y)));
-        const { dx, dy } = DV[dir];
-        const headX = cells[0].x + dx, headY = cells[0].y + dy;
-        if (!ownCells.has(key(headX, headY))) {
-          snakes.push({ id, dir, cells });
-          id--;
-          break;
-        }
+        const ray = getExitRayCells({ cells, dir }, cols, rows);
+        if (!ray.some(c => ownCells.has(`${c.x},${c.y}`))) { final = { id, dir, cells }; break; }
       }
     }
+    if (final) { snakes.push(final); id++; }
   }
-
-  // Reverse so player order is correct (first to exit = index 0)
-  snakes.reverse();
-  snakes.forEach((s, idx) => s.id = idx);
 
   return { cols, rows, snakes };
 }
-
 
 // ── MINI PREVIEW ──────────────────────────────────────────────────────────────
 const DIR_ARROW = { R:"→", L:"←", D:"↓", U:"↑" };
@@ -206,7 +180,7 @@ function MiniPreview({ level }) {
           })
         )}
       </div>
-      <div style={{ color:"#4a5070", fontSize:11 }}>{cols}×{rows} · {snakes.length} snakes</div>
+      <div style={{ color:"#8a9bc0", fontSize:11 }}>{cols}×{rows} · {snakes.length} snakes</div>
     </div>
   );
 }
@@ -261,7 +235,6 @@ export default function Generator({ onSendToEditor }) {
       <div style={s.title}>🐍 Snake Escape — Level Generator</div>
       <div style={s.sub}>Generate levels by difficulty and send them to the editor.</div>
 
-      {/* Difficulty picker */}
       <div style={s.row}>
         <span style={s.label}>Difficulty</span>
         <div style={{ display:"flex", gap:8 }}>
@@ -276,20 +249,17 @@ export default function Generator({ onSendToEditor }) {
         </div>
       </div>
 
-      {/* Count */}
       <div style={s.row}>
         <span style={s.label}>Number of levels</span>
         <input style={s.input} type="number" min={1} max={200} value={count}
           onChange={e => setCount(Math.max(1, Math.min(200, +e.target.value)))} />
       </div>
 
-      {/* Grid size info */}
       <div style={{ ...s.row, marginBottom:20 }}>
         <span style={s.label}>Grid size</span>
         <span style={{ color:"#4a5070", fontSize:13 }}>{cfg.cols}×{cfg.rows} · dep rate {Math.round(cfg.depRate * 100)}%</span>
       </div>
 
-      {/* Buttons */}
       <div style={{ display:"flex", gap:12, marginBottom:20 }}>
         <button style={s.btn("#4a9eff")} onClick={generate} disabled={generating}>
           {generating ? `Generating… ${progress}%` : "⚡ Generate"}
@@ -301,14 +271,12 @@ export default function Generator({ onSendToEditor }) {
         )}
       </div>
 
-      {/* Progress bar */}
       {generating && (
         <div style={s.bar}>
           <div style={s.fill(progress, cfg.color)} />
         </div>
       )}
 
-      {/* Preview */}
       {levels && (
         <div style={s.card}>
           <div style={{ fontSize:13, color:"#c8cfe0", marginBottom:12 }}>
