@@ -5,18 +5,24 @@ import { DV, DK, simulateExit, getExitRayCells } from "./arrow-logic.js";
 // ── SOLVER ────────────────────────────────────────────────────────────────────
 function solve(snakes, cols, rows) {
   // Returns ordered solution array or null if unsolvable
-  const tryOrder = (remaining, cleared, order) => {
+  // Bails out after 50000 attempts to prevent freezing
+  let attempts = 0;
+  const MAX_ATTEMPTS = 50000;
+
+  const tryOrder = (remaining, order) => {
+    if (attempts > MAX_ATTEMPTS) return null;
     if (remaining.length === 0) return order;
     for (const snake of remaining) {
+      attempts++;
       if (simulateExit(snake, remaining, cols, rows)) {
         const next = remaining.filter(s => s.id !== snake.id);
-        const result = tryOrder(next, [...cleared, snake.id], [...order, snake.id]);
+        const result = tryOrder(next, [...order, snake.id]);
         if (result) return result;
       }
     }
     return null;
   };
-  return tryOrder(snakes, [], []);
+  return tryOrder(snakes, []);
 }
 
 function estimateTime(snakes, solutionOrder) {
@@ -119,8 +125,10 @@ export default function Editor({ levels: initialLevels, difficulty }) {
   const snake = level?.snakes.find(s => s.id === selSnake);
 
   // ── SOLVE ──
-  const runSolve = () => {
+  const runSolve = async () => {
     if (!level) return;
+    // Yield to browser first so UI stays responsive
+    await new Promise(r => setTimeout(r, 0));
     const order = solve(level.snakes, level.cols, level.rows);
     setSolutions(prev => ({ ...prev, [selLevel]: order }));
     setSolveStep(0);
