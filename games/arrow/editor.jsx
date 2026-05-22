@@ -4,25 +4,47 @@ import { DV, DK, simulateExit, getExitRayCells } from "./arrow-logic.js";
 
 // ── SOLVER ────────────────────────────────────────────────────────────────────
 function solve(snakes, cols, rows) {
-  // Returns ordered solution array or null if unsolvable
-  // Bails out after 50000 attempts to prevent freezing
+  // Returns { order, partial, stuck } 
+  // order = full solution or null
+  // partial = how far it got before getting stuck
+  // stuck = snake ids that can't move at the point of failure
   let attempts = 0;
   const MAX_ATTEMPTS = 50000;
+  let bestPartial = [];
 
   const tryOrder = (remaining, order) => {
     if (attempts > MAX_ATTEMPTS) return null;
     if (remaining.length === 0) return order;
-    for (const snake of remaining) {
-      attempts++;
-      if (simulateExit(snake, remaining, cols, rows)) {
-        const next = remaining.filter(s => s.id !== snake.id);
-        const result = tryOrder(next, [...order, snake.id]);
-        if (result) return result;
-      }
+
+    const canMove = remaining.filter(s => simulateExit(s, remaining, cols, rows));
+    
+    if (canMove.length === 0) {
+      // Deadlock — record this as best partial if it's the furthest we've gotten
+      if (order.length > bestPartial.length) bestPartial = [...order];
+      return null;
     }
+
+    for (const snake of canMove) {
+      attempts++;
+      const next = remaining.filter(s => s.id !== snake.id);
+      const result = tryOrder(next, [...order, snake.id]);
+      if (result) return result;
+    }
+
+    if (order.length > bestPartial.length) bestPartial = [...order];
     return null;
   };
-  return tryOrder(snakes, []);
+
+  const order = tryOrder(snakes, []);
+  
+  if (order) return { order, partial: order, stuck: [] };
+  
+  // Find which snakes are stuck at the partial solution point
+  const clearedIds = new Set(bestPartial);
+  const remaining = snakes.filter(s => !clearedIds.has(s.id));
+  const stuck = remaining.filter(s => !simulateExit(s, remaining, cols, rows)).map(s => s.id);
+  
+  return { order: null, partial: bestPartial, stuck };
 }
 
 function estimateTime(snakes, solutionOrder) {
@@ -127,14 +149,13 @@ export default function Editor({ levels: initialLevels, difficulty }) {
   // ── SOLVE ──
   const runSolve = async () => {
     if (!level) return;
-    // Yield to browser first so UI stays responsive
     await new Promise(r => setTimeout(r, 0));
-    const order = solve(level.snakes, level.cols, level.rows);
-    setSolutions(prev => ({ ...prev, [selLevel]: order }));
+    const result = solve(level.snakes, level.cols, level.rows);
+    setSolutions(prev => ({ ...prev, [selLevel]: result }));
     setSolveStep(0);
   };
 
-  const stepForward  = () => setSolveStep(s => Math.min(s + 1, sol?.length ?? 0));
+  const stepForward  = () => setSolveStep(s => Math.min(s + 1, (sol?.partial?.length ?? 0)));
   const stepBackward = () => setSolveStep(s => Math.max(s - 1, 0));
   const resetSteps   = () => setSolveStep(0);
 
@@ -189,7 +210,7 @@ export default function Editor({ levels: initialLevels, difficulty }) {
     setSaving(false);
   };
 
-  const timeEst = sol ? estimateTime(level.snakes, sol) : null;
+  const timeEst = sol?.order ? estimateTime(level.snakes, sol.order) : null;
 
   const s = {
     page:    { minHeight:"100vh", background:"#0d1020", color:"#fff", fontFamily:"monospace", display:"flex" },
@@ -216,7 +237,7 @@ export default function Editor({ levels: initialLevels, difficulty }) {
   const statusIcon = (idx) => {
     const s = solutions[idx];
     if (s === undefined) return "•";
-    if (s === null) return "❌";
+    if (s.order === null) return "❌";
     return "✅";
   };
 
@@ -274,30 +295,38 @@ export default function Editor({ levels: initialLevels, difficulty }) {
                 level={level}
                 selectedId={selSnake}
                 onSelectSnake={id => setSelSnake(id === selSnake ? null : id)}
-                highlightOrder={sol}
+                highlightOrder={sol?.partial}
                 step={solveStep}
               />
 
-              {/* Solve controls */}
               <div style={{ display:"flex", gap:8, flexWrap:"wrap", justifyContent:"center" }}>
                 <button style={s.btn("#4a9eff", false)} onClick={runSolve}>🔍 Solve</button>
                 {sol !== undefined && (
-                  sol === null
-                    ? <span style={{ color:"#ff6b6b", fontSize:13, alignSelf:"center" }}>❌ Unsolvable</span>
-                    : <span style={{ color:"#7bed9f", fontSize:13, alignSelf:"center" }}>✅ Solvable — {sol.length} moves</span>
+                  sol.order
+                    ? <span style={{ color:"#7bed9f", fontSize:13, alignSelf:"center" }}>✅ Solvable — {sol.order.length} moves</span>
+                    : <span style={{ color:"#ff6b6b", fontSize:13, alignSelf:"center" }}>❌ Stuck after {sol.partial.length} moves</span>
                 )}
               </div>
 
-              {/* Step through solution */}
-              {sol && solveStep !== null && (
-                <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-                  <button style={s.btnSm(false)} onClick={resetSteps}>⏮</button>
-                  <button style={s.btnSm(false)} onClick={stepBackward} disabled={solveStep === 0}>◀</button>
-                  <span style={{ color:"#c8cfe0", fontSize:12, minWidth:80, textAlign:"center" }}>
-                    Step {solveStep} / {sol.length}
-                  </span>
-                  <button style={s.btnSm(false)} onClick={stepForward} disabled={solveStep === sol.length}>▶</button>
-                  <button style={s.btnSm(false)} onClick={() => setSolveStep(sol.length)}>⏭</button>
+              {/* Step through — works for both solvable and unsolvable */}
+              {sol?.partial?.length > 0 && solveStep !== null && (
+                <div style={{ display:"flex", flexDirection:"column", gap:8, alignItems:"center" }}>
+                  <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                    <button style={s.btnSm(false)} onClick={resetSteps}>⏮</button>
+                    <button style={s.btnSm(false)} onClick={stepBackward} disabled={solveStep === 0}>◀</button>
+                    <span style={{ color:"#c8cfe0", fontSize:13, minWidth:100, textAlign:"center" }}>
+                      Step {solveStep} / {sol.partial.length}
+                    </span>
+                    <button style={s.btnSm(false)} onClick={stepForward} disabled={solveStep === sol.partial.length}>▶</button>
+                    <button style={s.btnSm(false)} onClick={() => setSolveStep(sol.partial.length)}>⏭</button>
+                  </div>
+                  {/* Show stuck snakes at end of partial */}
+                  {!sol.order && solveStep === sol.partial.length && sol.stuck.length > 0 && (
+                    <div style={{ background:"#1a0a0a", border:"1px solid #ff6b6b44", borderRadius:8,
+                      padding:"8px 14px", fontSize:12, color:"#ff8a80", textAlign:"center" }}>
+                      🔒 Deadlock — snakes {sol.stuck.join(", ")} are blocking each other
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -348,14 +377,14 @@ export default function Editor({ levels: initialLevels, difficulty }) {
                   <div style={{ color:"#7bed9f", fontSize:14, textAlign:"center" }}>✅ Saved to DB</div>
                 ) : (
                   <button
-                    style={s.btn("#7bed9f", !sol || saving)}
+                    style={s.btn("#7bed9f", !sol?.order || saving)}
                     onClick={saveLevel}
-                    disabled={!sol || saving}
+                    disabled={!sol?.order || saving}
                   >
                     {saving ? "Saving…" : "💾 Approve & Save"}
                   </button>
                 )}
-                {!sol && <div style={{ color:"#4a5070", fontSize:12, marginTop:8 }}>Solve first to enable saving.</div>}
+                {!sol?.order && <div style={{ color:"#8a9bc0", fontSize:12, marginTop:8 }}>Solve first to enable saving.</div>}
               </div>
             </div>
           </>
