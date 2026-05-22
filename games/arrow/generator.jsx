@@ -1,5 +1,4 @@
 import { useState, useCallback } from "react";
-import { DV, DK, simulateExit, getExitRayCells, blocksExitPath, createsDependency } from "./arrow-logic.js";
 
 // ── DIFFICULTY CONFIGS ────────────────────────────────────────────────────────
 const DIFFICULTIES = {
@@ -15,138 +14,88 @@ function lcg(seed) {
   return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 0x100000000; };
 }
 
-// ── MAKE LEVEL ────────────────────────────────────────────────────────────────
+// ── MAKE LEVEL (REVERSE GENERATION) ──────────────────────────────────────────
+// Snakes are placed backwards onto the board, guaranteeing 100% solvability.
+// Last snake placed = first snake the player removes.
 function makeLevel(cols, rows, minLen, maxLen, seed, depRate) {
   const rand = lcg(seed);
   const ri = n => Math.floor(rand() * n);
+  const rc = arr => arr[Math.floor(rand() * arr.length)];
   const key = (x, y) => `${x},${y}`;
   const inBounds = (x, y) => x >= 0 && x < cols && y >= 0 && y < rows;
 
-  const validCells = Array.from({ length: rows }, (_, r) =>
-    Array.from({ length: cols }, (_, c) => ({ x: c, y: r }))).flat();
-
-  const treeNbrs = new Map();
-  for (const c of validCells) treeNbrs.set(key(c.x, c.y), []);
-
-  const mazeVisited = new Set();
-  const startCell = validCells[ri(validCells.length)];
-  mazeVisited.add(key(startCell.x, startCell.y));
-  const stack = [startCell];
-
-  while (stack.length) {
-    const cur = stack[stack.length - 1];
-    const unvisited = [...DK]
-      .sort(() => rand() - 0.5)
-      .map(d => { const { dx, dy } = DV[d]; return { x: cur.x + dx, y: cur.y + dy }; })
-      .filter(n => inBounds(n.x, n.y) && !mazeVisited.has(key(n.x, n.y)));
-    if (unvisited.length) {
-      const next = unvisited[0];
-      const nk = key(next.x, next.y), ck = key(cur.x, cur.y);
-      mazeVisited.add(nk);
-      treeNbrs.get(ck).push(nk);
-      treeNbrs.get(nk).push(ck);
-      stack.push(next);
-    } else { stack.pop(); }
-  }
-
-  const assigned = new Set();
-  const segments = [];
-
-  const pickStart = () => {
-    let best = null, bestDeg = Infinity;
-    for (const [k] of treeNbrs) {
-      if (assigned.has(k)) continue;
-      const ud = treeNbrs.get(k).filter(n => !assigned.has(n)).length;
-      if (ud < bestDeg) { bestDeg = ud; best = k; }
-    }
-    return best;
+  const DIRS = ["U", "D", "L", "R"];
+  const DVlocal = {
+    U: { dx: 0, dy: -1, opp: "D" },
+    D: { dx: 0, dy: 1,  opp: "U" },
+    L: { dx: -1, dy: 0, opp: "R" },
+    R: { dx: 1,  dy: 0, opp: "L" },
   };
 
-  while (assigned.size < mazeVisited.size) {
-    const startKey = pickStart();
-    if (!startKey) break;
-    const seg = [startKey];
-    assigned.add(startKey);
-    while (seg.length < maxLen) {
-      const curKey = seg[seg.length - 1];
-      const unassignedNbrs = treeNbrs.get(curKey).filter(n => !assigned.has(n));
-      if (!unassignedNbrs.length) break;
-      let nextKey = unassignedNbrs[0];
-      if (seg.length >= 2) {
-        const [cx, cy] = curKey.split(",").map(Number);
-        const [px, py] = seg[seg.length - 2].split(",").map(Number);
-        const straight = key(cx + (cx - px), cy + (cy - py));
-        const turns = unassignedNbrs.filter(n => n !== straight);
-        // Prefer turning 70% of the time to create tighter coiling
-        if (turns.length > 0 && rand() < 0.70) {
-          nextKey = turns[Math.floor(rand() * turns.length)];
-        } else if (unassignedNbrs.includes(straight)) {
-          nextKey = straight;
-        } else {
-          nextKey = unassignedNbrs[Math.floor(rand() * unassignedNbrs.length)];
-        }
-      }
-      const junctionThreshold = Math.max(minLen, Math.floor(maxLen * 0.45));
-      if (seg.length >= junctionThreshold && unassignedNbrs.length > 1) break;
-      seg.push(nextKey);
-      assigned.add(nextKey);
-    }
-    segments.push(seg.map(k => { const [x, y] = k.split(",").map(Number); return { x, y }; }));
-  }
-
+  const occupied = new Set();
   const snakes = [];
-  let id = 0;
+  let currentId = 0;
 
-  for (const cells of segments) {
-    const bodyDx = Math.abs(cells[0].x - cells[cells.length - 1].x);
-    const bodyDy = Math.abs(cells[0].y - cells[cells.length - 1].y);
-    const isHoriz = bodyDx >= bodyDy;
-    const makeDirs = () => {
-      if (rand() < 0.6) {
-        const axial = (isHoriz ? ["L", "R"] : ["U", "D"]).sort(() => rand() - 0.5);
-        const lateral = (isHoriz ? ["U", "D"] : ["L", "R"]).sort(() => rand() - 0.5);
-        return [...axial, ...lateral];
+  const getWindingTurns = (cx, cy, currentDir) => {
+    const perps = ["U", "D"].includes(currentDir) ? ["L", "R"] : ["U", "D"];
+    return perps.filter(d => {
+      const step = DVlocal[DVlocal[d].opp];
+      const nx = cx + step.dx, ny = cy + step.dy;
+      return inBounds(nx, ny) && !occupied.has(key(nx, ny));
+    });
+  };
+
+  let consecutiveFailures = 0;
+  const maxFailures = 500;
+
+  while (consecutiveFailures < maxFailures) {
+    const startX = ri(cols);
+    const startY = ri(rows);
+
+    if (occupied.has(key(startX, startY))) { consecutiveFailures++; continue; }
+
+    const targetLength = Math.floor(rand() * (maxLen - minLen + 1)) + minLen;
+    const escapeDir = rc(DIRS);
+
+    const snakeCells = [{ x: startX, y: startY }];
+    let cx = startX, cy = startY, currentDir = escapeDir;
+
+    while (snakeCells.length < targetLength) {
+      const turns = getWindingTurns(cx, cy, currentDir);
+      const backStep = DVlocal[DVlocal[currentDir].opp];
+      const sx = cx + backStep.dx, sy = cy + backStep.dy;
+      const straightValid = inBounds(sx, sy) && !occupied.has(key(sx, sy));
+
+      if (turns.length > 0 && (!straightValid || rand() < 0.55)) {
+        currentDir = rc(turns);
       }
-      return [...DK].sort(() => rand() - 0.5);
-    };
 
-    const isInstantExit = (orientation, dir) => {
-      const h = orientation[0];
-      const { dx, dy } = DV[dir];
-      const nx = h.x + dx, ny = h.y + dy;
-      return nx < 0 || nx >= cols || ny < 0 || ny >= rows;
-    };
+      const finalStep = DVlocal[DVlocal[currentDir].opp];
+      cx += finalStep.dx; cy += finalStep.dy;
 
-    let placed = null, fallback = null;
-    for (const [orientation, dl] of [[cells, makeDirs()], [[...cells].reverse(), makeDirs()]]) {
-      if (placed) break;
-      for (const dir of dl) {
-        if (isInstantExit(orientation, dir) && rand() < 0.5) continue;
-        const ownCells = new Set(orientation.map(c => key(c.x, c.y)));
-        const ray = getExitRayCells({ cells: orientation, dir }, cols, rows);
-        if (ray.some(c => ownCells.has(`${c.x},${c.y}`))) continue;
-        const candidate = { id, dir, cells: orientation };
-        if (!simulateExit(candidate, snakes, cols, rows)) continue;
-        const hasDep = createsDependency(candidate, snakes, cols, rows);
-        const requireDep = snakes.length > 0 && rand() < depRate;
-        if (!requireDep || hasDep) { placed = candidate; break; }
-        else if (!fallback) fallback = candidate;
-      }
-    }
-
-    let final = placed || fallback;
-    if (!final) {
-      for (const dir of [...DK].sort(() => rand() - 0.5)) {
-        const ownCells = new Set(cells.map(c => key(c.x, c.y)));
-        const ray = getExitRayCells({ cells, dir }, cols, rows);
-        if (!ray.some(c => ownCells.has(`${c.x},${c.y}`))) { final = { id, dir, cells }; break; }
+      if (inBounds(cx, cy) && !occupied.has(key(cx, cy))) {
+        snakeCells.push({ x: cx, y: cy });
+      } else {
+        break;
       }
     }
-    if (final) { snakes.push(final); id++; }
+
+    if (snakeCells.length >= minLen) {
+      snakeCells.forEach(c => occupied.add(key(c.x, c.y)));
+      snakes.push({ id: currentId++, dir: escapeDir, cells: snakeCells });
+      consecutiveFailures = 0;
+    } else {
+      consecutiveFailures++;
+    }
   }
+
+  // Reverse: last placed = first to exit = guaranteed solvable
+  snakes.reverse();
+  snakes.forEach((s, idx) => s.id = idx);
 
   return { cols, rows, snakes };
 }
+
 
 // ── MINI PREVIEW ──────────────────────────────────────────────────────────────
 const DIR_ARROW = { R:"→", L:"←", D:"↓", U:"↑" };
