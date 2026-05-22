@@ -76,7 +76,15 @@ function makeLevel(cols, rows, minLen, maxLen, seed, depRate) {
         const [cx, cy] = curKey.split(",").map(Number);
         const [px, py] = seg[seg.length - 2].split(",").map(Number);
         const straight = key(cx + (cx - px), cy + (cy - py));
-        if (unassignedNbrs.includes(straight)) nextKey = straight;
+        const turns = unassignedNbrs.filter(n => n !== straight);
+        // Prefer turning 70% of the time to create tighter coiling
+        if (turns.length > 0 && rand() < 0.70) {
+          nextKey = turns[Math.floor(rand() * turns.length)];
+        } else if (unassignedNbrs.includes(straight)) {
+          nextKey = straight;
+        } else {
+          nextKey = unassignedNbrs[Math.floor(rand() * unassignedNbrs.length)];
+        }
       }
       const junctionThreshold = Math.max(minLen, Math.floor(maxLen * 0.45));
       if (seg.length >= junctionThreshold && unassignedNbrs.length > 1) break;
