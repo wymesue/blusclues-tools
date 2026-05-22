@@ -82,7 +82,18 @@ function makeLevel(cols, rows, minLen, maxLen, seed, depRate) {
     if (!startKey) break;
     const seg = [startKey];
     assigned.add(startKey);
-    while (seg.length < maxLen) {
+
+    // Weighted length per segment: 40% short, 40% medium, 20% long
+    const roll = rand();
+    const shortMax = Math.max(minLen, Math.floor(maxLen * 0.33));
+    const medMax   = Math.max(shortMax + 1, Math.floor(maxLen * 0.66));
+    const segMaxLen = roll < 0.40
+      ? Math.floor(rand() * (shortMax - minLen + 1)) + minLen
+      : roll < 0.80
+      ? Math.floor(rand() * (medMax - shortMax)) + shortMax + 1
+      : Math.floor(rand() * (maxLen - medMax)) + medMax + 1;
+
+    while (seg.length < segMaxLen) {
       const curKey = seg[seg.length - 1];
       const unassignedNbrs = treeNbrs.get(curKey).filter(n => !assigned.has(n));
       if (!unassignedNbrs.length) break;
@@ -100,8 +111,7 @@ function makeLevel(cols, rows, minLen, maxLen, seed, depRate) {
           nextKey = unassignedNbrs[Math.floor(rand() * unassignedNbrs.length)];
         }
       }
-      const junctionThreshold = Math.max(minLen, Math.floor(maxLen * 0.45));
-      if (seg.length >= junctionThreshold && unassignedNbrs.length > 1) break;
+      if (unassignedNbrs.length > 1) break;
       seg.push(nextKey);
       assigned.add(nextKey);
     }
