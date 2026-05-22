@@ -3,10 +3,10 @@ import { DV, DK, simulateExit, getExitRayCells, blocksExitPath, createsDependenc
 
 // ── DIFFICULTY CONFIGS ────────────────────────────────────────────────────────
 const DIFFICULTIES = {
-  easy:   { label: "Easy",   cols: 8,  rows: 10, minLen: 2, maxLen: 5,  depRate: 0.15, color: "#7bed9f" },
-  medium: { label: "Medium", cols: 10, rows: 13, minLen: 3, maxLen: 8,  depRate: 0.45, color: "#ffd93d" },
-  hard:   { label: "Hard",   cols: 12, rows: 16, minLen: 4, maxLen: 12, depRate: 0.75, color: "#ff6b6b" },
-  expert: { label: "Expert", cols: 14, rows: 18, minLen: 5, maxLen: 16, depRate: 0.95, color: "#a29bfe" },
+  easy:   { label: "Easy",   cols: 6,  rows: 8,  minLen: 2, maxLen: 4,  depRate: 0.10, color: "#7bed9f" },
+  medium: { label: "Medium", cols: 8,  rows: 10, minLen: 2, maxLen: 6,  depRate: 0.20, color: "#ffd93d" },
+  hard:   { label: "Hard",   cols: 10, rows: 12, minLen: 3, maxLen: 8,  depRate: 0.30, color: "#ff6b6b" },
+  expert: { label: "Expert", cols: 12, rows: 14, minLen: 3, maxLen: 10, depRate: 0.40, color: "#a29bfe" },
 };
 
 // ── LCG RANDOM ────────────────────────────────────────────────────────────────
