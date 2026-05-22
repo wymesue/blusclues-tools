@@ -43,7 +43,7 @@ const DIFF_COLOR = { easy:"#7bed9f", medium:"#ffd93d", hard:"#ff6b6b", expert:"#
 function MiniGrid({ level, selectedId, onSelectSnake, highlightOrder, step }) {
   if (!level) return null;
   const { cols, rows, snakes } = level;
-  const CELL = Math.min(Math.floor(320 / cols), Math.floor(400 / rows), 28);
+  const CELL = Math.min(Math.floor(520 / cols), Math.floor(600 / rows), 44);
 
   const cellMap = new Map();
   snakes.forEach(s => s.cells.forEach(c => cellMap.set(`${c.x},${c.y}`, s.id)));
@@ -185,22 +185,22 @@ export default function Editor({ levels: initialLevels, difficulty }) {
 
   const s = {
     page:    { minHeight:"100vh", background:"#0d1020", color:"#fff", fontFamily:"monospace", display:"flex" },
-    sidebar: { width:220, background:"#090d1f", borderRight:"1px solid #1a2040", display:"flex", flexDirection:"column", flexShrink:0 },
+    sidebar: { width:280, background:"#090d1f", borderRight:"1px solid #1a2040", display:"flex", flexDirection:"column", flexShrink:0 },
     main:    { flex:1, padding:24, display:"flex", gap:24 },
-    panel:   { background:"#141828", border:"1px solid #1e2438", borderRadius:12, padding:16 },
+    panel:   { background:"#141828", border:"1px solid #1e2438", borderRadius:12, padding:20 },
     btn:     (color, disabled) => ({
       background: disabled ? "#1a2040" : color,
       border:"none", borderRadius:8, color: disabled ? "#2a3060" : "#0d1020",
-      padding:"8px 16px", fontSize:13, cursor: disabled ? "default" : "pointer", fontWeight:700,
+      padding:"10px 20px", fontSize:15, cursor: disabled ? "default" : "pointer", fontWeight:700,
     }),
     btnSm:   (active) => ({
       background: active ? "#4a9eff" : "#1e2438",
       border:"1px solid #2a3050", borderRadius:6,
       color: active ? "#fff" : "#c8cfe0",
-      padding:"5px 10px", fontSize:12, cursor:"pointer",
+      padding:"7px 14px", fontSize:14, cursor:"pointer",
     }),
     tag: (color) => ({
-      fontSize:10, padding:"2px 6px", borderRadius:4,
+      fontSize:13, padding:"3px 10px", borderRadius:4,
       background:`${color}22`, color, border:`1px solid ${color}44`,
     }),
   };
@@ -222,23 +222,23 @@ export default function Editor({ levels: initialLevels, difficulty }) {
 
       {/* Sidebar — level list */}
       <div style={s.sidebar}>
-        <div style={{ padding:"14px 12px", borderBottom:"1px solid #1a2040",
-          fontSize:13, fontWeight:700, color:"#4a9eff" }}>
+        <div style={{ padding:"16px 14px", borderBottom:"1px solid #1a2040",
+          fontSize:16, fontWeight:700, color:"#4a9eff" }}>
           🐍 Levels ({levels.length})
         </div>
         <div style={{ flex:1, overflowY:"auto" }}>
           {levels.map((l, i) => (
             <div key={i} onClick={() => { setSelLevel(i); setSelSnake(null); setSolveStep(null); }}
-              style={{ padding:"10px 12px", borderBottom:"1px solid #0d1020",
+              style={{ padding:"14px 16px", borderBottom:"1px solid #0d1020",
                 background: i === selLevel ? "#1a2040" : "transparent",
                 cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
               <div>
-                <div style={{ fontSize:12, color:"#c8cfe0" }}>Level {i + 1}</div>
-                <div style={{ fontSize:10, color:"#4a5070" }}>{l.cols}×{l.rows} · {l.snakes.length} snakes</div>
+                <div style={{ fontSize:15, color:"#c8cfe0" }}>Level {i + 1}</div>
+                <div style={{ fontSize:13, color:"#4a5070" }}>{l.cols}×{l.rows} · {l.snakes.length} snakes</div>
               </div>
               <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:3 }}>
-                <span style={{ fontSize:14 }}>{statusIcon(i)}</span>
-                {saved[i] && <span style={{ fontSize:9, color:"#7bed9f" }}>saved</span>}
+                <span style={{ fontSize:18 }}>{statusIcon(i)}</span>
+                {saved[i] && <span style={{ fontSize:11, color:"#7bed9f" }}>saved</span>}
               </div>
             </div>
           ))}
@@ -303,21 +303,21 @@ export default function Editor({ levels: initialLevels, difficulty }) {
             </div>
 
             {/* Edit panel */}
-            <div style={{ ...s.panel, width:220, display:"flex", flexDirection:"column", gap:16 }}>
-              <div style={{ fontSize:13, fontWeight:700, color:"#4a9eff" }}>Edit Tools</div>
+            <div style={{ ...s.panel, width:280, display:"flex", flexDirection:"column", gap:20 }}>
+              <div style={{ fontSize:16, fontWeight:700, color:"#4a9eff" }}>Edit Tools</div>
 
               {!snake ? (
-                <div style={{ color:"#4a5070", fontSize:12 }}>Tap a snake on the grid to select it.</div>
+                <div style={{ color:"#4a5070", fontSize:14 }}>Tap a snake on the grid to select it.</div>
               ) : (
                 <>
                   <div>
-                    <div style={{ fontSize:11, color:"#4a5070", marginBottom:8 }}>
+                    <div style={{ fontSize:13, color:"#4a5070", marginBottom:10 }}>
                       Snake {snake.id} · {snake.cells.length} cells
                     </div>
 
                     {/* Direction */}
-                    <div style={{ fontSize:11, color:"#c8cfe0", marginBottom:6 }}>Direction</div>
-                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+                    <div style={{ fontSize:13, color:"#c8cfe0", marginBottom:8 }}>Direction</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
                       {DIRS.map(d => (
                         <button key={d} style={s.btnSm(snake.dir === d)} onClick={() => changeDir(d)}>
                           {DIR_LABEL[d]} {d}
@@ -326,7 +326,7 @@ export default function Editor({ levels: initialLevels, difficulty }) {
                     </div>
                   </div>
 
-                  <div style={{ borderTop:"1px solid #1e2438", paddingTop:12 }}>
+                  <div style={{ borderTop:"1px solid #1e2438", paddingTop:14 }}>
                     <button onClick={deleteSnake} style={{ ...s.btn("#ff6b6b", false), width:"100%" }}>
                       🗑 Delete Snake
                     </button>
@@ -337,7 +337,7 @@ export default function Editor({ levels: initialLevels, difficulty }) {
               {/* Save to DB */}
               <div style={{ marginTop:"auto", borderTop:"1px solid #1e2438", paddingTop:16 }}>
                 {saved[selLevel] ? (
-                  <div style={{ color:"#7bed9f", fontSize:12, textAlign:"center" }}>✅ Saved to DB</div>
+                  <div style={{ color:"#7bed9f", fontSize:14, textAlign:"center" }}>✅ Saved to DB</div>
                 ) : (
                   <button
                     style={s.btn("#7bed9f", !sol || saving)}
@@ -347,7 +347,7 @@ export default function Editor({ levels: initialLevels, difficulty }) {
                     {saving ? "Saving…" : "💾 Approve & Save"}
                   </button>
                 )}
-                {!sol && <div style={{ color:"#4a5070", fontSize:10, marginTop:6 }}>Solve first to enable saving.</div>}
+                {!sol && <div style={{ color:"#4a5070", fontSize:12, marginTop:8 }}>Solve first to enable saving.</div>}
               </div>
             </div>
           </>
