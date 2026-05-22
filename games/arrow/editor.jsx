@@ -99,7 +99,7 @@ function MiniGrid({ level, selectedId, onSelectSnake, highlightOrder, step }) {
           );
         })}
       </svg>
-      <div style={{ color:"#4a5070", fontSize:11 }}>{cols}×{rows} · {snakes.length} snakes</div>
+      <div style={{ color:"#8a9bc0", fontSize:13 }}>{cols}×{rows} · {snakes.length} snakes</div>
     </div>
   );
 }
@@ -234,7 +234,7 @@ export default function Editor({ levels: initialLevels, difficulty }) {
                 cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
               <div>
                 <div style={{ fontSize:15, color:"#c8cfe0" }}>Level {i + 1}</div>
-                <div style={{ fontSize:13, color:"#4a5070" }}>{l.cols}×{l.rows} · {l.snakes.length} snakes</div>
+                <div style={{ fontSize:13, color:"#8a9bc0" }}>{l.cols}×{l.rows} · {l.snakes.length} snakes</div>
               </div>
               <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:3 }}>
                 <span style={{ fontSize:18 }}>{statusIcon(i)}</span>
@@ -311,7 +311,7 @@ export default function Editor({ levels: initialLevels, difficulty }) {
               ) : (
                 <>
                   <div>
-                    <div style={{ fontSize:13, color:"#4a5070", marginBottom:10 }}>
+                <div style={{ fontSize:13, color:"#8a9bc0", marginBottom:10 }}>
                       Snake {snake.id} · {snake.cells.length} cells
                     </div>
 
