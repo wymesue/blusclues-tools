@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { DV, DK, simulateExit } from "./arrow-logic.js";
 
 // ── DIFFICULTY CONFIGS ────────────────────────────────────────────────────────
 const DIFFICULTIES = {
@@ -14,82 +15,147 @@ function lcg(seed) {
   return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 0x100000000; };
 }
 
-// ── MAKE LEVEL (REVERSE GENERATION) ──────────────────────────────────────────
-// Snakes are placed backwards onto the board, guaranteeing 100% solvability.
-// Last snake placed = first snake the player removes.
+// ── MAKE LEVEL ────────────────────────────────────────────────────────────────
+// Maze fills the grid beautifully with turn bias.
+// Directions assigned in reverse order so each snake can exit when it's its turn.
 function makeLevel(cols, rows, minLen, maxLen, seed, depRate) {
   const rand = lcg(seed);
   const ri = n => Math.floor(rand() * n);
-  const rc = arr => arr[Math.floor(rand() * arr.length)];
   const key = (x, y) => `${x},${y}`;
   const inBounds = (x, y) => x >= 0 && x < cols && y >= 0 && y < rows;
 
-  const DIRS = ["U", "D", "L", "R"];
-  const DVlocal = {
-    U: { dx: 0, dy: -1, opp: "D" },
-    D: { dx: 0, dy: 1,  opp: "U" },
-    L: { dx: -1, dy: 0, opp: "R" },
-    R: { dx: 1,  dy: 0, opp: "L" },
-  };
+  const validCells = Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: cols }, (_, c) => ({ x: c, y: r }))).flat();
 
-  const occupied = new Set();
-  const snakes = [];
-  let currentId = 0;
+  const treeNbrs = new Map();
+  for (const c of validCells) treeNbrs.set(key(c.x, c.y), []);
 
-  const getWindingTurns = (cx, cy, currentDir) => {
-    const perps = ["U", "D"].includes(currentDir) ? ["L", "R"] : ["U", "D"];
-    return perps.filter(d => {
-      const step = DVlocal[DVlocal[d].opp];
-      const nx = cx + step.dx, ny = cy + step.dy;
-      return inBounds(nx, ny) && !occupied.has(key(nx, ny));
-    });
-  };
+  // ── Maze carving with turn bias ──
+  const mazeVisited = new Set();
+  const startCell = validCells[ri(validCells.length)];
+  mazeVisited.add(key(startCell.x, startCell.y));
+  const stack = [startCell];
+  let lastDir = null;
 
-  let consecutiveFailures = 0;
-  const maxFailures = 500;
+  while (stack.length) {
+    const cur = stack[stack.length - 1];
+    const neighbors = [...DK]
+      .sort(() => rand() - 0.5)
+      .map(d => ({ d, ...(() => { const {dx,dy} = DV[d]; return {x:cur.x+dx, y:cur.y+dy}; })() }))
+      .filter(n => inBounds(n.x, n.y) && !mazeVisited.has(key(n.x, n.y)));
 
-  while (consecutiveFailures < maxFailures) {
-    const startX = ri(cols);
-    const startY = ri(rows);
-
-    if (occupied.has(key(startX, startY))) { consecutiveFailures++; continue; }
-
-    const targetLength = Math.floor(rand() * (maxLen - minLen + 1)) + minLen;
-    const escapeDir = rc(DIRS);
-
-    const snakeCells = [{ x: startX, y: startY }];
-    let cx = startX, cy = startY, currentDir = escapeDir;
-
-    while (snakeCells.length < targetLength) {
-      const turns = getWindingTurns(cx, cy, currentDir);
-      const backStep = DVlocal[DVlocal[currentDir].opp];
-      const sx = cx + backStep.dx, sy = cy + backStep.dy;
-      const straightValid = inBounds(sx, sy) && !occupied.has(key(sx, sy));
-
-      if (turns.length > 0 && (!straightValid || rand() < 0.55)) {
-        currentDir = rc(turns);
-      }
-
-      const finalStep = DVlocal[DVlocal[currentDir].opp];
-      cx += finalStep.dx; cy += finalStep.dy;
-
-      if (inBounds(cx, cy) && !occupied.has(key(cx, cy))) {
-        snakeCells.push({ x: cx, y: cy });
-      } else {
-        break;
-      }
-    }
-
-    if (snakeCells.length >= minLen) {
-      snakeCells.forEach(c => occupied.add(key(c.x, c.y)));
-      snakes.push({ id: currentId++, dir: escapeDir, cells: snakeCells });
-      consecutiveFailures = 0;
+    if (neighbors.length) {
+      // Prefer turning 65% of the time
+      const turns = lastDir ? neighbors.filter(n => n.d !== lastDir) : [];
+      const next = turns.length > 0 && rand() < 0.65 
+        ? turns[Math.floor(rand() * turns.length)]
+        : neighbors[0];
+      
+      lastDir = next.d;
+      const nk = key(next.x, next.y), ck = key(cur.x, cur.y);
+      mazeVisited.add(nk);
+      treeNbrs.get(ck).push(nk);
+      treeNbrs.get(nk).push(ck);
+      stack.push({ x: next.x, y: next.y });
     } else {
-      consecutiveFailures++;
+      stack.pop();
+      lastDir = null;
     }
   }
 
-  // Reverse: last placed = first to exit = guaranteed solvable
+  // ── Segment carving ──
+  const assigned = new Set();
+  const segments = [];
+
+  const pickStart = () => {
+    let best = null, bestDeg = Infinity;
+    for (const [k] of treeNbrs) {
+      if (assigned.has(k)) continue;
+      const ud = treeNbrs.get(k).filter(n => !assigned.has(n)).length;
+      if (ud < bestDeg) { bestDeg = ud; best = k; }
+    }
+    return best;
+  };
+
+  while (assigned.size < mazeVisited.size) {
+    const startKey = pickStart();
+    if (!startKey) break;
+    const seg = [startKey];
+    assigned.add(startKey);
+    while (seg.length < maxLen) {
+      const curKey = seg[seg.length - 1];
+      const unassignedNbrs = treeNbrs.get(curKey).filter(n => !assigned.has(n));
+      if (!unassignedNbrs.length) break;
+      let nextKey = unassignedNbrs[0];
+      if (seg.length >= 2) {
+        const [cx, cy] = curKey.split(",").map(Number);
+        const [px, py] = seg[seg.length - 2].split(",").map(Number);
+        const straight = key(cx + (cx - px), cy + (cy - py));
+        const turns = unassignedNbrs.filter(n => n !== straight);
+        if (turns.length > 0 && rand() < 0.65) {
+          nextKey = turns[Math.floor(rand() * turns.length)];
+        } else if (unassignedNbrs.includes(straight)) {
+          nextKey = straight;
+        } else {
+          nextKey = unassignedNbrs[Math.floor(rand() * unassignedNbrs.length)];
+        }
+      }
+      const junctionThreshold = Math.max(minLen, Math.floor(maxLen * 0.45));
+      if (seg.length >= junctionThreshold && unassignedNbrs.length > 1) break;
+      seg.push(nextKey);
+      assigned.add(nextKey);
+    }
+    segments.push(seg.map(k => { const [x, y] = k.split(",").map(Number); return { x, y }; }));
+  }
+
+  // ── Smart reverse direction assignment ──
+  // Process segments in reverse. Each snake gets the first direction that
+  // allows it to exit given snakes already assigned (which come after it in play order).
+  const snakes = [];
+  let id = segments.length - 1;
+
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const cells = segments[i];
+    let placed = false;
+
+    for (const orientation of [cells, [...cells].reverse()]) {
+      if (placed) break;
+      const shuffledDirs = [...DK].sort(() => rand() - 0.5);
+      for (const dir of shuffledDirs) {
+        const ownCells = new Set(orientation.map(c => key(c.x, c.y)));
+        // Check snake doesn't point back into itself
+        const { dx, dy } = DV[dir];
+        const headX = orientation[0].x + dx;
+        const headY = orientation[0].y + dy;
+        if (ownCells.has(key(headX, headY))) continue;
+        
+        const candidate = { id, dir, cells: orientation };
+        // Can this snake exit given the snakes already placed?
+        if (simulateExit(candidate, snakes, cols, rows)) {
+          snakes.push(candidate);
+          placed = true;
+          id--;
+          break;
+        }
+      }
+    }
+
+    // If no valid direction found, place with best guess
+    if (!placed) {
+      for (const dir of DK) {
+        const ownCells = new Set(cells.map(c => key(c.x, c.y)));
+        const { dx, dy } = DV[dir];
+        const headX = cells[0].x + dx, headY = cells[0].y + dy;
+        if (!ownCells.has(key(headX, headY))) {
+          snakes.push({ id, dir, cells });
+          id--;
+          break;
+        }
+      }
+    }
+  }
+
+  // Reverse so player order is correct (first to exit = index 0)
   snakes.reverse();
   snakes.forEach((s, idx) => s.id = idx);
 
